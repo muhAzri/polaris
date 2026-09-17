@@ -1,0 +1,33 @@
+# Env
+.env
+.env.local
+*.local
+
+# Go
+apps/api/bin/
+apps/api/tmp/
+*.exe
+
+# Node
+node_modules/
+apps/web/.next/
+apps/web/out/
+npm-debug.log*
+
+# Flutter / Dart
+apps/mobile/.dart_tool/
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/build/
+apps/mobile/android/.gradle/
+apps/mobile/android/local.properties
+apps/mobile/ios/Flutter/Flutter.podspec
+apps/mobile/ios/Pods/
+apps/mobile/.idea/
+apps/mobile/*.iml
+
+# OS
+.DS_Store
+
+# Docker volumes (local dev data)
+infra/data/

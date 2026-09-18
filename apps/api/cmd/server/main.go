@@ -16,7 +16,9 @@ import (
 	"polaris-api/internal/config"
 	"polaris-api/internal/course"
 	"polaris-api/internal/database"
+	"polaris-api/internal/eventbus"
 	"polaris-api/internal/httpserver"
+	"polaris-api/internal/rbac"
 )
 
 func main() {
@@ -47,12 +49,16 @@ func run() error {
 	authService := auth.NewService(pool, cfg.JWTSecret, cfg.JWTTTLHours)
 	authHandler := auth.NewHandler(authService)
 
-	courseService := course.NewService(pool)
+	rbacService := rbac.NewService(pool)
+	events := eventbus.New(pool)
+
+	courseService := course.NewService(pool, rbacService, events)
 	courseHandler := course.NewHandler(courseService)
 
 	router := httpserver.NewRouter(httpserver.Deps{
 		AuthHandler:   authHandler,
 		CourseHandler: courseHandler,
+		RBACService:   rbacService,
 	})
 
 	return serve(cfg.Port, router)

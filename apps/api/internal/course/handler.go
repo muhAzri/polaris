@@ -56,6 +56,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, courses)
 }
 
+func (h *Handler) ListSections(w http.ResponseWriter, r *http.Request) {
+	courseID := r.PathValue("id")
+	sections, err := h.service.ListSections(r.Context(), courseID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list sections")
+		return
+	}
+	writeJSON(w, http.StatusOK, sections)
+}
+
 func (h *Handler) Enroll(w http.ResponseWriter, r *http.Request) {
 	userID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {

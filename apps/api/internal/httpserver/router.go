@@ -6,11 +6,13 @@ import (
 
 	"polaris-api/internal/auth"
 	"polaris-api/internal/course"
+	"polaris-api/internal/rbac"
 )
 
 type Deps struct {
 	AuthHandler   *auth.Handler
 	CourseHandler *course.Handler
+	RBACService   *rbac.Service
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -23,8 +25,21 @@ func NewRouter(deps Deps) http.Handler {
 	mux.Handle("GET /api/v1/auth/me", deps.AuthHandler.RequireAuth(http.HandlerFunc(deps.AuthHandler.Me)))
 
 	mux.HandleFunc("GET /api/v1/courses", deps.CourseHandler.List)
-	mux.Handle("POST /api/v1/courses", deps.AuthHandler.RequireAuth(http.HandlerFunc(deps.CourseHandler.Create)))
-	mux.Handle("POST /api/v1/courses/{id}/enroll", deps.AuthHandler.RequireAuth(http.HandlerFunc(deps.CourseHandler.Enroll)))
+	mux.HandleFunc("GET /api/v1/courses/{id}/sections", deps.CourseHandler.ListSections)
+
+	// course:manage / course:enrol replace what used to be ad-hoc role
+	// checks (ROADMAP.md section 2.1) — RequireAuth resolves the user,
+	// RequireCapability resolves the context and checks the capability.
+	mux.Handle("POST /api/v1/courses", deps.AuthHandler.RequireAuth(
+		deps.RBACService.RequireCapability("course:manage", func(r *http.Request) (string, error) {
+			return deps.RBACService.SystemContextID(r.Context())
+		})(http.HandlerFunc(deps.CourseHandler.Create)),
+	))
+	mux.Handle("POST /api/v1/courses/{id}/enroll", deps.AuthHandler.RequireAuth(
+		deps.RBACService.RequireCapability("course:enrol", func(r *http.Request) (string, error) {
+			return deps.RBACService.ContextID(r.Context(), rbac.ContextLevelCourse, r.PathValue("id"))
+		})(http.HandlerFunc(deps.CourseHandler.Enroll)),
+	))
 
 	return withCORS(mux)
 }

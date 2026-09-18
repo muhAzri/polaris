@@ -13,12 +13,15 @@ import (
 	"time"
 
 	"polaris-api/internal/auth"
+	"polaris-api/internal/calendar"
 	"polaris-api/internal/config"
 	"polaris-api/internal/content"
 	"polaris-api/internal/course"
 	"polaris-api/internal/coursemodule"
 	"polaris-api/internal/database"
 	"polaris-api/internal/eventbus"
+	"polaris-api/internal/gradebook"
+	"polaris-api/internal/groups"
 	"polaris-api/internal/httpserver"
 	"polaris-api/internal/rbac"
 	"polaris-api/internal/storage"
@@ -67,11 +70,23 @@ func run() error {
 	contentService := content.NewService(pool, courseModules, events, objectStorage)
 	contentHandler := content.NewHandler(contentService)
 
+	gradebookService := gradebook.NewService(pool, events)
+	gradebookHandler := gradebook.NewHandler(gradebookService)
+
+	groupsService := groups.NewService(pool, events)
+	groupsHandler := groups.NewHandler(groupsService)
+
+	calendarService := calendar.NewService(pool)
+	calendarHandler := calendar.NewHandler(calendarService)
+
 	router := httpserver.NewRouter(httpserver.Deps{
-		AuthHandler:    authHandler,
-		CourseHandler:  courseHandler,
-		ContentHandler: contentHandler,
-		RBACService:    rbacService,
+		AuthHandler:      authHandler,
+		CourseHandler:    courseHandler,
+		ContentHandler:   contentHandler,
+		GradebookHandler: gradebookHandler,
+		GroupsHandler:    groupsHandler,
+		CalendarHandler:  calendarHandler,
+		RBACService:      rbacService,
 	})
 
 	return serve(cfg.Port, router)

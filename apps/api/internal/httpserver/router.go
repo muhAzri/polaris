@@ -5,14 +5,16 @@ import (
 	"net/http"
 
 	"polaris-api/internal/auth"
+	"polaris-api/internal/content"
 	"polaris-api/internal/course"
 	"polaris-api/internal/rbac"
 )
 
 type Deps struct {
-	AuthHandler   *auth.Handler
-	CourseHandler *course.Handler
-	RBACService   *rbac.Service
+	AuthHandler    *auth.Handler
+	CourseHandler  *course.Handler
+	ContentHandler *content.Handler
+	RBACService    *rbac.Service
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -28,8 +30,8 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/courses/{id}/sections", deps.CourseHandler.ListSections)
 
 	// course:manage / course:enrol replace what used to be ad-hoc role
-	// checks (ROADMAP.md section 2.1) — RequireAuth resolves the user,
-	// RequireCapability resolves the context and checks the capability.
+	// checks — RequireAuth resolves the user, RequireCapability resolves
+	// the context and checks the capability.
 	mux.Handle("POST /api/v1/courses", deps.AuthHandler.RequireAuth(
 		deps.RBACService.RequireCapability("course:manage", func(r *http.Request) (string, error) {
 			return deps.RBACService.SystemContextID(r.Context())
@@ -41,7 +43,58 @@ func NewRouter(deps Deps) http.Handler {
 		})(http.HandlerFunc(deps.CourseHandler.Enroll)),
 	))
 
+	// The 6 static content modules. Reads are public like course/section
+	// listing above; writes need mod:manage at the owning course's context
+	// — resolved via the section/module id in the path since neither route
+	// carries a course id directly.
+	mux.HandleFunc("GET /api/v1/courses/{id}/content", deps.ContentHandler.CourseContent)
+
+	requireModManageOnSection := func(next http.Handler) http.Handler {
+		return deps.AuthHandler.RequireAuth(
+			deps.RBACService.RequireCapability("mod:manage", sectionCourseContext(deps))(next),
+		)
+	}
+	requireModManageOnModule := func(next http.Handler) http.Handler {
+		return deps.AuthHandler.RequireAuth(
+			deps.RBACService.RequireCapability("mod:manage", moduleCourseContext(deps))(next),
+		)
+	}
+
+	mux.Handle("POST /api/v1/sections/{sectionId}/modules/label", requireModManageOnSection(http.HandlerFunc(deps.ContentHandler.CreateLabel)))
+	mux.Handle("POST /api/v1/sections/{sectionId}/modules/page", requireModManageOnSection(http.HandlerFunc(deps.ContentHandler.CreatePage)))
+	mux.Handle("POST /api/v1/sections/{sectionId}/modules/url", requireModManageOnSection(http.HandlerFunc(deps.ContentHandler.CreateURL)))
+	mux.Handle("POST /api/v1/sections/{sectionId}/modules/resource", requireModManageOnSection(http.HandlerFunc(deps.ContentHandler.CreateResource)))
+	mux.Handle("POST /api/v1/sections/{sectionId}/modules/folder", requireModManageOnSection(http.HandlerFunc(deps.ContentHandler.CreateFolder)))
+	mux.Handle("POST /api/v1/sections/{sectionId}/modules/book", requireModManageOnSection(http.HandlerFunc(deps.ContentHandler.CreateBook)))
+
+	mux.Handle("POST /api/v1/modules/{moduleId}/folder-files", requireModManageOnModule(http.HandlerFunc(deps.ContentHandler.AddFolderFile)))
+	mux.Handle("POST /api/v1/modules/{moduleId}/book-chapters", requireModManageOnModule(http.HandlerFunc(deps.ContentHandler.AddBookChapter)))
+
 	return withCORS(mux)
+}
+
+// sectionCourseContext/moduleCourseContext resolve the RBAC context for
+// routes keyed by a section or module id rather than a course id directly —
+// mod:manage still applies at the course context, so it just needs one
+// extra lookup to find which course owns the section/module in the path.
+func sectionCourseContext(deps Deps) rbac.ContextResolver {
+	return func(r *http.Request) (string, error) {
+		courseID, err := deps.ContentHandler.CourseIDForSection(r, r.PathValue("sectionId"))
+		if err != nil {
+			return "", err
+		}
+		return deps.RBACService.ContextID(r.Context(), rbac.ContextLevelCourse, courseID)
+	}
+}
+
+func moduleCourseContext(deps Deps) rbac.ContextResolver {
+	return func(r *http.Request) (string, error) {
+		courseID, err := deps.ContentHandler.CourseIDForModule(r, r.PathValue("moduleId"))
+		if err != nil {
+			return "", err
+		}
+		return deps.RBACService.ContextID(r.Context(), rbac.ContextLevelCourse, courseID)
+	}
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {

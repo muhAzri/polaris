@@ -14,11 +14,14 @@ import (
 
 	"polaris-api/internal/auth"
 	"polaris-api/internal/config"
+	"polaris-api/internal/content"
 	"polaris-api/internal/course"
+	"polaris-api/internal/coursemodule"
 	"polaris-api/internal/database"
 	"polaris-api/internal/eventbus"
 	"polaris-api/internal/httpserver"
 	"polaris-api/internal/rbac"
+	"polaris-api/internal/storage"
 )
 
 func main() {
@@ -55,10 +58,20 @@ func run() error {
 	courseService := course.NewService(pool, rbacService, events)
 	courseHandler := course.NewHandler(courseService)
 
+	objectStorage, err := storage.NewS3Storage(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL)
+	if err != nil {
+		return err
+	}
+
+	courseModules := coursemodule.NewService(pool)
+	contentService := content.NewService(pool, courseModules, events, objectStorage)
+	contentHandler := content.NewHandler(contentService)
+
 	router := httpserver.NewRouter(httpserver.Deps{
-		AuthHandler:   authHandler,
-		CourseHandler: courseHandler,
-		RBACService:   rbacService,
+		AuthHandler:    authHandler,
+		CourseHandler:  courseHandler,
+		ContentHandler: contentHandler,
+		RBACService:    rbacService,
 	})
 
 	return serve(cfg.Port, router)

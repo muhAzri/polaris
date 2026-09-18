@@ -20,9 +20,9 @@ func NewService(pool *pgxpool.Pool, rbacService *rbac.Service, events *eventbus.
 }
 
 // Create inserts the course together with the default "General" section
-// and manual enrolment method every course needs (ROADMAP.md section 2.2),
-// then emits course.created so other modules (notifications, search, ...)
-// can react without Create knowing about them.
+// and manual enrolment method every course needs, then emits
+// course.created so other modules (notifications, search, ...) can react
+// without Create knowing about them.
 func (s *Service) Create(ctx context.Context, ownerID, title, description string) (*Course, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -113,8 +113,7 @@ func (s *Service) ListSections(ctx context.Context, courseID string) ([]Section,
 	return sections, rows.Err()
 }
 
-// Enroll uses the course's manual enrolment method (ROADMAP.md section
-// 2.2/Phase 0 enrolment methods framework) rather than writing to
+// Enroll uses the course's manual enrolment method rather than writing to
 // enrollments directly, so self/cohort/guest methods can be added later
 // without touching this call site.
 func (s *Service) Enroll(ctx context.Context, courseID, userID string) error {

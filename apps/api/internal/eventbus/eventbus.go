@@ -1,8 +1,8 @@
-// Package eventbus is Polaris's in-process pub/sub (ROADMAP.md section
-// 2.3). New modules (notifications, completion, badges, ...) subscribe to
-// events instead of every service calling into every other service
-// directly. It's deliberately just a Go map of handlers plus an
-// event_log table for later replay/debugging — no broker needed yet.
+// Package eventbus is Polaris's in-process pub/sub. New modules
+// (notifications, completion, badges, ...) subscribe to events instead of
+// every service calling into every other service directly. It's
+// deliberately just a Go map of handlers plus an event_log table for later
+// replay/debugging — no broker needed yet.
 package eventbus
 
 import (

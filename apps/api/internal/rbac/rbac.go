@@ -1,6 +1,6 @@
 // Package rbac implements Polaris's role/capability/context permission
-// model (ROADMAP.md section 2.1): a role is a bundle of capabilities, a
-// context is where a check applies (system/category/course/module/user),
+// model: a role is a bundle of capabilities, a context is where a check
+// applies (system/category/course/module/user),
 // and a role assignment grants a role to a user at a context. A capability
 // granted at the system context is treated as global and satisfies checks
 // at any more specific context, mirroring Moodle's context inheritance
@@ -38,8 +38,9 @@ func (s *Service) SystemContextID(ctx context.Context) (string, error) {
 
 // ContextID returns the context row for (level, instanceID), creating it on
 // first use. Non-system contexts are created lazily this way because
-// nothing else in Phase 0 owns their lifecycle yet (e.g. a course's
-// context is created the first time a capability check needs it).
+// nothing else owns their lifecycle — e.g. a course's context is created
+// the first time a capability check needs it, not when the course itself
+// is created.
 func (s *Service) ContextID(ctx context.Context, level, instanceID string) (string, error) {
 	var id string
 	err := s.pool.QueryRow(ctx, `

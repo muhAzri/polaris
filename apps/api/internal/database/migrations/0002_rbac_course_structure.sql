@@ -1,7 +1,7 @@
--- Phase 0 (Foundation Hardening): role/capability/context RBAC, generic
--- course structure (category/section/module), enrolment methods framework,
--- and the event_log backing the in-process event bus. See ROADMAP.md
--- section 2 for why these had to land before any feature module.
+-- Foundational schema every feature module builds on: role/capability/
+-- context RBAC, generic course structure (category/section/module),
+-- enrolment methods framework, and the event_log backing the in-process
+-- event bus.
 
 CREATE TABLE roles (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -23,7 +23,7 @@ CREATE TABLE role_capabilities (
     PRIMARY KEY (role_id, capability_id)
 );
 
--- Mirrors Moodle's context levels, simplified to what Phase 0-2 need.
+-- Mirrors Moodle's context levels, simplified to the levels currently used.
 CREATE TABLE contexts (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     level       TEXT NOT NULL CHECK (level IN ('system', 'category', 'course', 'module', 'user')),
@@ -65,8 +65,9 @@ CREATE TABLE course_sections (
 CREATE INDEX idx_course_sections_course ON course_sections(course_id);
 
 -- Polymorphic: module_type + instance_id point at a <module_type>-specific
--- table (assignments, quizzes, ...) that doesn't exist yet. Phase 1 is the
--- first thing that populates rows here.
+-- table (e.g. mod_labels, mod_pages, or a future assignments/quizzes table)
+-- owned by that module's own package, so course/section code never needs to
+-- know about every module type that exists.
 CREATE TABLE course_modules (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     section_id  UUID NOT NULL REFERENCES course_sections(id) ON DELETE CASCADE,
@@ -101,9 +102,10 @@ CREATE TABLE event_log (
 CREATE INDEX idx_event_log_name ON event_log(name);
 CREATE INDEX idx_event_log_created_at ON event_log(created_at);
 
--- Seed roles matching the existing users.role enum, plus the initial
--- capability list (deliberately small — see ROADMAP.md section 7, item 3;
--- grow it per-phase instead of front-loading all of Moodle's 400+).
+-- Seed roles matching the existing users.role enum, plus an initial
+-- capability list (deliberately small and specific to what's implemented
+-- today; grow it incrementally as features need new checks instead of
+-- front-loading all of Moodle's 400+ capabilities).
 INSERT INTO roles (name, description) VALUES
     ('student', 'Can view and participate in enrolled courses'),
     ('teacher', 'Can manage courses and grade students'),
@@ -153,10 +155,10 @@ SET enrolment_method_id = em.id
 FROM enrolment_methods em
 WHERE em.course_id = e.course_id AND em.type = 'manual' AND e.enrolment_method_id IS NULL;
 
--- users.role stays the source of truth for register/login (backward
--- compatible, per ROADMAP.md section 4 Phase 0 scope) — this trigger keeps
--- role_assignments in sync with it automatically so nothing downstream has
--- to remember to write both.
+-- users.role stays the source of truth for register/login so existing
+-- auth code doesn't need to change — this trigger keeps role_assignments
+-- in sync with it automatically so nothing downstream has to remember to
+-- write both.
 CREATE OR REPLACE FUNCTION sync_user_role_assignment() RETURNS TRIGGER AS $$
 DECLARE
     sys_context_id UUID;

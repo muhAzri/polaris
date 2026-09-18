@@ -19,10 +19,10 @@ func NewService(pool *pgxpool.Pool, rbacService *rbac.Service, events *eventbus.
 	return &Service{pool: pool, rbac: rbacService, events: events}
 }
 
-// Create inserts the course together with the default "General" section
-// and manual enrolment method every course needs, then emits
-// course.created so other modules (notifications, search, ...) can react
-// without Create knowing about them.
+// Create inserts the course together with the default "General" section,
+// manual enrolment method, and "Uncategorized" grade category every course
+// needs, then emits course.created so other modules (notifications,
+// search, ...) can react without Create knowing about them.
 func (s *Service) Create(ctx context.Context, ownerID, title, description string) (*Course, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -48,6 +48,12 @@ func (s *Service) Create(ctx context.Context, ownerID, title, description string
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO enrolment_methods (course_id, type) VALUES ($1, 'manual')
+	`, c.ID); err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO grade_categories (course_id, name) VALUES ($1, 'Uncategorized')
 	`, c.ID); err != nil {
 		return nil, err
 	}

@@ -1,7 +1,8 @@
 # Polaris
 
-An open-source LMS inspired by Moodle's feature scope — courses, enrollment,
-assignments, grading — rebuilt from scratch on a modern, resource-efficient
+An open-source LMS modelled closely on Moodle's feature scope — courses, roles
+and permissions, enrolment, gradebook, groups, calendar, and soon assignments and
+quizzes — rebuilt from scratch on a modern, resource-efficient
 stack: clean UX, low infrastructure cost, and a developer experience that
 starts with one command.
 
@@ -78,13 +79,22 @@ OpenAPI spec, shared UI components, shared types) — not before.
 ```text
 apps/api/
 ├── cmd/server/          # entrypoint: config, DB connect, migrate, serve
+├── e2e/                 # end-to-end parity tests (need a throwaway database)
 └── internal/
+    ├── app/             # wires services and handlers into one router
     ├── config/          # env-based configuration
     ├── database/        # pgx pool + embedded SQL migrations
-    ├── auth/             # register/login/me, JWT issuing + middleware
-    ├── course/           # courses + enrollment
-    ├── storage/           # Storage interface + S3/MinIO implementation
-    └── httpserver/       # route wiring
+    ├── auth/            # register/login/me, JWT issuing + middleware
+    ├── rbac/            # roles, capabilities, per-context assignments, overrides
+    ├── course/          # courses, categories, sections, enrolment
+    ├── coursemodule/    # generic activity/resource attachment + edit/move/delete
+    ├── content/         # label, page, url, resource, folder, book
+    ├── gradebook/       # category tree, items, grades, aggregation, reports
+    ├── groups/          # groups + groupings
+    ├── calendar/        # course/user/site events, repeats, iCal export
+    ├── eventbus/        # in-process pub/sub + event_log
+    ├── storage/         # Storage interface + S3/MinIO implementation
+    └── httpserver/      # route wiring
 ```
 
 Each domain lives in its own `internal/` package so a feature can grow
@@ -111,29 +121,54 @@ flutter pub get
 flutter run
 ```
 
-## API reference (v0.1)
+## API reference
 
-| Method | Path                      | Auth | Description          |
-| ------ | ------------------------- | ---- | --------------------- |
-| GET    | `/api/v1/health`          | –    | Liveness check        |
-| POST   | `/api/v1/auth/register`   | –    | Create an account     |
-| POST   | `/api/v1/auth/login`      | –    | Get a JWT             |
-| GET    | `/api/v1/auth/me`         | ✅   | Current user          |
-| GET    | `/api/v1/courses`         | –    | List courses          |
-| POST   | `/api/v1/courses`         | ✅   | Create a course       |
-| POST   | `/api/v1/courses/{id}/enroll` | ✅ | Enroll in a course |
+Every route is registered in `apps/api/internal/httpserver/router.go`, next to
+the capability it requires. Authenticated requests send
+`Authorization: Bearer <token>`. Permissions are checked with Moodle-style
+roles: a role is assigned to a user at a *context* (site → category → course
+→ module) and permissions are resolved down that path, with per-context
+overrides. A user's role inside a course comes from their enrolment, not from
+`users.role`.
 
-Authenticated requests send `Authorization: Bearer <token>`.
+| Area | Routes (all under `/api/v1`) |
+| ---- | ---------------------------- |
+| Auth | `POST /auth/register`, `POST /auth/login`, `GET /auth/me` |
+| Courses | `GET/POST /courses`, `GET /courses/available`, `GET/PUT/DELETE /courses/{id}`, `GET /courses/{id}/my-capabilities` |
+| Categories | `GET/POST /categories`, `PUT/DELETE /categories/{id}` (`?move_to=` relocates contents) |
+| Sections | `GET/POST /courses/{id}/sections`, `PATCH/DELETE /sections/{id}` |
+| Enrolment | `GET /courses/{id}/participants`, `POST /courses/{id}/enrolments`, `PATCH/DELETE /courses/{id}/enrolments/{userId}`, `GET/PUT /courses/{id}/self-enrolment`, `POST /courses/{id}/enroll` |
+| Roles | `GET /roles`, `/admin/roles`, `/admin/capabilities`, `/admin/role-assignments`; per context: `/courses/{id}/role-assignments`, `/courses/{id}/role-overrides` (same under `/categories/{id}`) |
+| Content | `GET /courses/{id}/content`, `POST /sections/{id}/modules/{label\|page\|url\|resource\|folder\|book}`, `PATCH/DELETE /modules/{id}`, `PUT /modules/{id}/content`, folder files and book chapters under `/modules/{id}/…` |
+| Gradebook | `/courses/{id}/gradebook/{categories,items,mine,report,users/{userId}}`, `PATCH/DELETE /gradebook/{categories,items}/{id}`, `POST /gradebook/items/{id}/grades/{userId}`, grade history |
+| Groups | `/courses/{id}/groups` (+ `/auto`), `/courses/{id}/groupings`, `PATCH/DELETE /groups/{id}`, group members, grouping contents |
+| Calendar | `/courses/{id}/events`, `/users/me/events`, `GET /users/me/calendar.ics`, `PATCH/DELETE /events/{id}`, `POST /admin/events` |
+
+### Tests
+
+```bash
+cd apps/api && go test ./...        # aggregation and calendar unit tests
+```
+
+`apps/api/e2e` builds the whole API in-process and drives it over HTTP
+through the behaviours that should match Moodle (per-course roles,
+inheritance, overrides, hidden content, gradebook totals, groups, calendar).
+It is skipped unless `E2E_DATABASE_URL` is set, and it **drops the whole
+schema** of that database, so it refuses any database whose name does not
+contain `e2e` or `test`:
+
+```bash
+docker compose exec -T postgres psql -U polaris postgres -c "create database polaris_e2e"
+cd apps/api
+E2E_DATABASE_URL='postgres://polaris:polaris@localhost:5433/polaris_e2e?sslmode=disable' go test ./e2e/
+```
 
 ## Roadmap
 
-- [x] v0.1 — Auth, courses, enrollment
-- [ ] v0.2 — Assignments, submissions
-- [ ] v0.3 — Quizzes, grading
-- [ ] v0.4 — File uploads (assignments, course materials) via presigned URLs
-- [ ] v0.5 — Notifications
-- [ ] v0.6 — Flutter mobile app (offline-first course viewing, scaffolded)
-- [ ] v1.0 — Plugin system, self-hosting docs, first tagged release
+The plan for reaching Moodle core parity, phase by phase with dependencies
+and exit criteria, lives in `ROADMAP.md` one directory up from this folder.
+Foundation, static content, gradebook, groups and calendar are done and audited;
+assignments are next.
 
 ## License
 

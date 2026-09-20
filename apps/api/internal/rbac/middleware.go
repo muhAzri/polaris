@@ -2,7 +2,10 @@ package rbac
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+
+	"github.com/jackc/pgx/v5"
 
 	"polaris-api/internal/auth"
 )
@@ -25,6 +28,10 @@ func (s *Service) RequireCapability(capability string, resolveContext ContextRes
 			}
 
 			contextID, err := resolveContext(r)
+			if errors.Is(err, ErrContextNotFound) || errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "not found")
+				return
+			}
 			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid context")
 				return

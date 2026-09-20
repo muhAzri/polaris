@@ -1,0 +1,64 @@
+/* Hallmark · genre: editorial · macrostructure: Index-First (app: ledger) · theme: custom (vibe: "quiet campus ledger, teal ink on warm paper") · nav: N9 · footer: Ft2
+ * theme axes: paper light / display roman-serif / accent cool-teal (chromatic-other)
+ */
+@theme static {
+  /* paper + ink — anchored on warm hue 90 */
+  --color-paper: oklch(97.5% 0.009 90);
+  --color-paper-2: oklch(94.5% 0.012 90);
+  --color-paper-3: oklch(91% 0.014 90);
+  --color-rule: oklch(84% 0.014 90);
+  --color-rule-strong: oklch(62% 0.02 90);
+  --color-muted: oklch(44% 0.02 80);
+  --color-ink: oklch(21% 0.018 70);
+
+  /* single accent — deep teal, used sparingly */
+  --color-accent: oklch(44% 0.085 200);
+  --color-accent-strong: oklch(37% 0.08 200);
+  --color-accent-wash: oklch(94% 0.03 200);
+  --color-on-accent: oklch(97.5% 0.009 90);
+  --color-focus: oklch(52% 0.13 200);
+
+  /* status */
+  --color-success: oklch(45% 0.11 150);
+  --color-success-wash: oklch(94% 0.04 150);
+  --color-danger: oklch(48% 0.18 27);
+  --color-danger-wash: oklch(95% 0.03 27);
+
+  /* type */
+  --font-display: var(--font-newsreader), ui-serif, Georgia, serif;
+  --font-body: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5625rem;
+  --text-2xl: 1.953rem;
+  --text-3xl: clamp(2rem, 1.4rem + 2.4vw, 2.75rem);
+  --text-display: clamp(2.25rem, 1.2rem + 4.2vw, 4rem);
+
+  --radius-sm: 2px;
+  --radius-md: 4px;
+}
+
+:root {
+  /* spacing — 4pt scale */
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --space-2xl: 3rem;
+  --space-3xl: 5rem;
+
+  --rule-hair: 1px;
+  --rule-heavy: 2px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.64, 0, 0.78, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+}

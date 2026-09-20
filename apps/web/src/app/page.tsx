@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 const STACK = ["Go", "Next.js", "PostgreSQL", "S3-compatible storage"];
 
 const FEATURES = [
@@ -29,59 +31,57 @@ export default async function Home() {
   const api = await getApiStatus();
 
   return (
-    <div className="flex flex-1 flex-col items-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex w-full max-w-3xl flex-1 flex-col gap-16 px-6 py-24 sm:px-10">
-        <header className="flex flex-col gap-4">
-          <span className="text-sm font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-            Polaris
-          </span>
-          <h1 className="text-4xl font-semibold tracking-tight text-black dark:text-zinc-50">
-            An open-source LMS inspired by Moodle, built for the modern stack.
-          </h1>
-          <p className="max-w-xl text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Same idea — courses, enrollment, assignments, grading — rebuilt
-            with a clean UI, a low-cost infrastructure footprint, and a
-            developer experience that starts with one command.
-          </p>
-        </header>
+    <main className="frame flex flex-1 flex-col gap-16 py-16">
+      <header className="flex max-w-3xl flex-col gap-6 pb-4">
+        <h1 className="text-display">
+          An open-source LMS inspired by Moodle, built for the modern stack.
+        </h1>
+        <p className="prose-measure text-lg text-muted">
+          Same idea — courses, enrollment, assignments, grading — rebuilt with a clean UI, a
+          low-cost infrastructure footprint, and a developer experience that starts with one
+          command.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/courses" className="btn btn-primary">
+            My courses
+          </Link>
+          <Link href="/register" className="btn">
+            Create an account
+          </Link>
+        </div>
+      </header>
 
-        <section className="flex flex-wrap gap-2">
-          {STACK.map((item) => (
-            <span
-              key={item}
-              className="rounded-full border border-black/[.08] px-3 py-1 text-sm text-zinc-700 dark:border-white/[.145] dark:text-zinc-300"
-            >
-              {item}
-            </span>
-          ))}
-        </section>
-
-        <section className="flex items-center gap-3 rounded-lg border border-black/[.08] px-4 py-3 dark:border-white/[.145]">
-          <span
-            className={`h-2.5 w-2.5 rounded-full ${api.ok ? "bg-emerald-500" : "bg-red-500"}`}
-            aria-hidden
-          />
-          <span className="text-sm text-zinc-700 dark:text-zinc-300">
-            {api.ok ? "API is reachable" : "API is unreachable"}{" "}
-            <span className="text-zinc-500 dark:text-zinc-500">
-              ({api.detail})
-            </span>
-          </span>
-        </section>
-
-        <section className="grid gap-6 sm:grid-cols-3">
+      <section aria-labelledby="why" className="flex flex-col gap-4">
+        <h2 id="why" className="text-2xl">
+          How it is built
+        </h2>
+        <dl className="m-0 border-t-2 border-ink">
           {FEATURES.map((feature) => (
-            <div key={feature.title} className="flex flex-col gap-2">
-              <h2 className="text-sm font-semibold text-black dark:text-zinc-50">
-                {feature.title}
-              </h2>
-              <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                {feature.body}
-              </p>
+            <div
+              key={feature.title}
+              className="grid gap-x-8 gap-y-1 border-b border-rule py-5 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]"
+            >
+              <dt className="font-display text-xl">{feature.title}</dt>
+              <dd className="prose-measure text-muted">{feature.body}</dd>
             </div>
           ))}
-        </section>
-      </main>
-    </div>
+        </dl>
+      </section>
+
+      <section aria-label="Stack and status" className="flex flex-col gap-6 border-t border-rule pt-8">
+        <p className="text-sm">
+          <span className="meta mr-3">Stack</span>
+          {STACK.join(" · ")}
+        </p>
+        <p role="status" className="flex items-center gap-2 text-sm">
+          <span
+            className={`inline-block size-2 ${api.ok ? "bg-success" : "bg-danger"}`}
+            aria-hidden
+          />
+          <span>{api.ok ? "API is reachable" : "API is unreachable"}</span>
+          <span className="meta break-all normal-case">{api.detail}</span>
+        </p>
+      </section>
+    </main>
   );
 }

@@ -12,18 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"polaris-api/internal/auth"
-	"polaris-api/internal/calendar"
+	"polaris-api/internal/app"
 	"polaris-api/internal/config"
-	"polaris-api/internal/content"
-	"polaris-api/internal/course"
-	"polaris-api/internal/coursemodule"
 	"polaris-api/internal/database"
-	"polaris-api/internal/eventbus"
-	"polaris-api/internal/gradebook"
-	"polaris-api/internal/groups"
-	"polaris-api/internal/httpserver"
-	"polaris-api/internal/rbac"
 	"polaris-api/internal/storage"
 )
 
@@ -52,42 +43,12 @@ func run() error {
 	}
 	log.Println("database ready")
 
-	authService := auth.NewService(pool, cfg.JWTSecret, cfg.JWTTTLHours)
-	authHandler := auth.NewHandler(authService)
-
-	rbacService := rbac.NewService(pool)
-	events := eventbus.New(pool)
-
-	courseService := course.NewService(pool, rbacService, events)
-	courseHandler := course.NewHandler(courseService)
-
 	objectStorage, err := storage.NewS3Storage(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL)
 	if err != nil {
 		return err
 	}
 
-	courseModules := coursemodule.NewService(pool)
-	contentService := content.NewService(pool, courseModules, events, objectStorage)
-	contentHandler := content.NewHandler(contentService)
-
-	gradebookService := gradebook.NewService(pool, events)
-	gradebookHandler := gradebook.NewHandler(gradebookService)
-
-	groupsService := groups.NewService(pool, events)
-	groupsHandler := groups.NewHandler(groupsService)
-
-	calendarService := calendar.NewService(pool)
-	calendarHandler := calendar.NewHandler(calendarService)
-
-	router := httpserver.NewRouter(httpserver.Deps{
-		AuthHandler:      authHandler,
-		CourseHandler:    courseHandler,
-		ContentHandler:   contentHandler,
-		GradebookHandler: gradebookHandler,
-		GroupsHandler:    groupsHandler,
-		CalendarHandler:  calendarHandler,
-		RBACService:      rbacService,
-	})
+	router := app.New(pool, app.Options{JWTSecret: cfg.JWTSecret, JWTTTLHours: cfg.JWTTTLHours}, objectStorage)
 
 	return serve(cfg.Port, router)
 }

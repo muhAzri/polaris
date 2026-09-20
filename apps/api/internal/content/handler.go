@@ -2,11 +2,14 @@ package content
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"strings"
 
 	"polaris-api/internal/auth"
+	"polaris-api/internal/coursemodule"
 )
 
 // maxUploadSize caps multipart bodies for resource/folder file uploads.
@@ -34,8 +37,12 @@ func (h *Handler) CourseIDForModule(r *http.Request, moduleID string) (string, e
 }
 
 func (h *Handler) CourseContent(w http.ResponseWriter, r *http.Request) {
-	courseID := r.PathValue("id")
-	sections, err := h.service.CourseContent(r.Context(), courseID)
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	sections, err := h.service.CourseContent(r.Context(), r.PathValue("id"), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load course content")
 		return
@@ -219,7 +226,7 @@ func (h *Handler) AddFolderFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	ff, err := h.service.AddFolderFile(r.Context(), r.PathValue("moduleId"), header.Filename, contentTypeOf(header), header.Size, file)
+	ff, err := h.service.AddFolderFile(r.Context(), r.PathValue("moduleId"), r.FormValue("path"), header.Filename, contentTypeOf(header), header.Size, file)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not add file to folder")
 		return
@@ -259,8 +266,9 @@ func (h *Handler) CreateBook(w http.ResponseWriter, r *http.Request) {
 }
 
 type chapterRequest struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	Title      string `json:"title"`
+	Content    string `json:"content"`
+	Subchapter bool   `json:"subchapter"`
 }
 
 func (h *Handler) AddBookChapter(w http.ResponseWriter, r *http.Request) {
@@ -280,12 +288,104 @@ func (h *Handler) AddBookChapter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chapter, err := h.service.AddBookChapter(r.Context(), r.PathValue("moduleId"), req.Title, req.Content)
+	chapter, err := h.service.AddBookChapter(r.Context(), r.PathValue("moduleId"), req.Title, req.Content, req.Subchapter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not add chapter")
 		return
 	}
 	writeJSON(w, http.StatusCreated, chapter)
+}
+
+// UpdateModule edits the generic module settings shared by every module type
+// (visibility, intro, group mode, availability, position).
+func (h *Handler) UpdateModule(w http.ResponseWriter, r *http.Request) {
+	var u coursemodule.Update
+	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	m, err := h.service.modules.Update(r.Context(), r.PathValue("moduleId"), u)
+	if h.writeModuleError(w, err, "could not update module") {
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+// UpdateModuleContent edits the fields owned by the module's own type.
+func (h *Handler) UpdateModuleContent(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if h.writeModuleError(w, h.service.UpdateContent(r.Context(), r.PathValue("moduleId"), body), "could not update module content") {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) DeleteModule(w http.ResponseWriter, r *http.Request) {
+	if h.writeModuleError(w, h.service.modules.Delete(r.Context(), r.PathValue("moduleId")), "could not delete module") {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) UpdateFolderFile(w http.ResponseWriter, r *http.Request) {
+	var u FolderFileUpdate
+	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if h.writeModuleError(w, h.service.UpdateFolderFile(r.Context(), r.PathValue("moduleId"), r.PathValue("fileId"), u), "could not update file") {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) DeleteFolderFile(w http.ResponseWriter, r *http.Request) {
+	if h.writeModuleError(w, h.service.DeleteFolderFile(r.Context(), r.PathValue("moduleId"), r.PathValue("fileId")), "could not delete file") {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) UpdateBookChapter(w http.ResponseWriter, r *http.Request) {
+	var u ChapterUpdate
+	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	ch, err := h.service.UpdateBookChapter(r.Context(), r.PathValue("moduleId"), r.PathValue("chapterId"), u)
+	if h.writeModuleError(w, err, "could not update chapter") {
+		return
+	}
+	writeJSON(w, http.StatusOK, ch)
+}
+
+func (h *Handler) DeleteBookChapter(w http.ResponseWriter, r *http.Request) {
+	if h.writeModuleError(w, h.service.DeleteBookChapter(r.Context(), r.PathValue("moduleId"), r.PathValue("chapterId")), "could not delete chapter") {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeModuleError maps module errors to HTTP statuses and reports whether
+// it wrote a response.
+func (h *Handler) writeModuleError(w http.ResponseWriter, err error, fallback string) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, coursemodule.ErrModuleNotFound), errors.Is(err, ErrNotFound), errors.Is(err, coursemodule.ErrSectionNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, ErrInvalidContent), errors.Is(err, coursemodule.ErrInvalidGroupMode),
+		errors.Is(err, coursemodule.ErrInvalidGrouping), errors.Is(err, coursemodule.ErrInvalidWindow),
+		errors.Is(err, coursemodule.ErrCrossCourseMove):
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, fallback)
+	}
+	return true
 }
 
 func contentTypeOf(header *multipart.FileHeader) string {

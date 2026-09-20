@@ -48,6 +48,7 @@ type FolderFile struct {
 	FileSize    int64     `json:"file_size"`
 	ContentType string    `json:"content_type"`
 	Position    int       `json:"position"`
+	DirPath     string    `json:"dir_path"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -59,12 +60,14 @@ type Book struct {
 }
 
 type BookChapter struct {
-	ID        string    `json:"id"`
-	BookID    string    `json:"book_id"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	Position  int       `json:"position"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         string    `json:"id"`
+	BookID     string    `json:"book_id"`
+	Title      string    `json:"title"`
+	Content    string    `json:"content"`
+	Position   int       `json:"position"`
+	Subchapter bool      `json:"subchapter"`
+	Hidden     bool      `json:"hidden"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // SectionContent/ModuleContent shape the read-only course-page view (GET
@@ -74,16 +77,27 @@ type BookChapter struct {
 type SectionContent struct {
 	ID       string          `json:"id"`
 	Title    string          `json:"title"`
+	Summary  string          `json:"summary"`
 	Position int             `json:"position"`
+	Visible  bool            `json:"visible"`
 	Modules  []ModuleContent `json:"modules"`
 }
 
+// ModuleContent is one activity on the course page. Restricted is set for
+// viewers who may not open it yet (outside its availability window): they
+// see that it exists and when it opens, but Data stays empty.
 type ModuleContent struct {
-	ID         string `json:"id"`
-	ModuleType string `json:"module_type"`
-	Position   int    `json:"position"`
-	Visible    bool   `json:"visible"`
-	Data       any    `json:"data"`
+	ID             string     `json:"id"`
+	ModuleType     string     `json:"module_type"`
+	Position       int        `json:"position"`
+	Visible        bool       `json:"visible"`
+	Intro          string     `json:"intro"`
+	GroupMode      string     `json:"group_mode"`
+	GroupingID     *string    `json:"grouping_id"`
+	AvailableFrom  *time.Time `json:"available_from"`
+	AvailableUntil *time.Time `json:"available_until"`
+	Restricted     bool       `json:"restricted"`
+	Data           any        `json:"data"`
 }
 
 type LabelData struct {
@@ -110,6 +124,8 @@ type ResourceData struct {
 }
 
 type FolderFileData struct {
+	ID          string `json:"id"`
+	DirPath     string `json:"dir_path"`
 	FileName    string `json:"file_name"`
 	FileSize    int64  `json:"file_size"`
 	ContentType string `json:"content_type"`
@@ -123,10 +139,12 @@ type FolderData struct {
 }
 
 type BookChapterData struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Content  string `json:"content"`
-	Position int    `json:"position"`
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Content    string `json:"content"`
+	Position   int    `json:"position"`
+	Subchapter bool   `json:"subchapter"`
+	Hidden     bool   `json:"hidden"`
 }
 
 type BookData struct {

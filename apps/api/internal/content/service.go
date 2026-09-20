@@ -16,6 +16,7 @@ import (
 
 	"polaris-api/internal/coursemodule"
 	"polaris-api/internal/eventbus"
+	"polaris-api/internal/rbac"
 	"polaris-api/internal/storage"
 )
 
@@ -26,10 +27,13 @@ type Service struct {
 	modules *coursemodule.Service
 	events  *eventbus.Dispatcher
 	storage storage.Storage
+	rbac    *rbac.Service
 }
 
-func NewService(pool *pgxpool.Pool, modules *coursemodule.Service, events *eventbus.Dispatcher, store storage.Storage) *Service {
-	return &Service{pool: pool, modules: modules, events: events, storage: store}
+func NewService(pool *pgxpool.Pool, modules *coursemodule.Service, events *eventbus.Dispatcher, store storage.Storage, rbacService *rbac.Service) *Service {
+	s := &Service{pool: pool, modules: modules, events: events, storage: store, rbac: rbacService}
+	s.registerDeleters()
+	return s
 }
 
 func (s *Service) emitCreated(ctx context.Context, moduleType, moduleID, sectionID, userID string) {
@@ -161,7 +165,8 @@ func (s *Service) CreateFolder(ctx context.Context, sectionID, userID, title, de
 // AddFolderFile takes a course_modules id (not the folder row's own id) so
 // handlers only ever deal in module ids — the same id used for capability
 // checks — instead of juggling two different ids for one resource.
-func (s *Service) AddFolderFile(ctx context.Context, moduleID, fileName, contentType string, size int64, body io.Reader) (*FolderFile, error) {
+func (s *Service) AddFolderFile(ctx context.Context, moduleID, dirPath, fileName, contentType string, size int64, body io.Reader) (*FolderFile, error) {
+	dirPath = normalizeDir(dirPath)
 	mod, err := s.modules.Get(ctx, moduleID)
 	if err != nil {
 		return nil, err
@@ -177,10 +182,10 @@ func (s *Service) AddFolderFile(ctx context.Context, moduleID, fileName, content
 
 	var ff FolderFile
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO mod_folder_files (folder_id, file_key, file_name, file_size, content_type, position)
-		VALUES ($1, $2, $3, $4, $5, (SELECT COALESCE(MAX(position) + 1, 0) FROM mod_folder_files WHERE folder_id = $1))
-		RETURNING id, folder_id, file_key, file_name, file_size, content_type, position, created_at
-	`, mod.InstanceID, key, fileName, size, contentType).Scan(&ff.ID, &ff.FolderID, &ff.FileKey, &ff.FileName, &ff.FileSize, &ff.ContentType, &ff.Position, &ff.CreatedAt)
+		INSERT INTO mod_folder_files (folder_id, file_key, file_name, file_size, content_type, position, dir_path)
+		VALUES ($1, $2, $3, $4, $5, (SELECT COALESCE(MAX(position) + 1, 0) FROM mod_folder_files WHERE folder_id = $1), $6)
+		RETURNING id, folder_id, file_key, file_name, file_size, content_type, position, dir_path, created_at
+	`, mod.InstanceID, key, fileName, size, contentType, dirPath).Scan(&ff.ID, &ff.FolderID, &ff.FileKey, &ff.FileName, &ff.FileSize, &ff.ContentType, &ff.Position, &ff.DirPath, &ff.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +213,7 @@ func (s *Service) CreateBook(ctx context.Context, sectionID, userID, title, intr
 
 // AddBookChapter takes a course_modules id for the same reason AddFolderFile
 // does — see above.
-func (s *Service) AddBookChapter(ctx context.Context, moduleID, title, content string) (*BookChapter, error) {
+func (s *Service) AddBookChapter(ctx context.Context, moduleID, title, content string, subchapter bool) (*BookChapter, error) {
 	mod, err := s.modules.Get(ctx, moduleID)
 	if err != nil {
 		return nil, err
@@ -219,10 +224,11 @@ func (s *Service) AddBookChapter(ctx context.Context, moduleID, title, content s
 
 	var ch BookChapter
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO mod_book_chapters (book_id, title, content, position)
-		VALUES ($1, $2, $3, (SELECT COALESCE(MAX(position) + 1, 0) FROM mod_book_chapters WHERE book_id = $1))
-		RETURNING id, book_id, title, content, position, created_at
-	`, mod.InstanceID, title, content).Scan(&ch.ID, &ch.BookID, &ch.Title, &ch.Content, &ch.Position, &ch.CreatedAt)
+		INSERT INTO mod_book_chapters (book_id, title, content, position, subchapter)
+		VALUES ($1, $2, $3, (SELECT COALESCE(MAX(position) + 1, 0) FROM mod_book_chapters WHERE book_id = $1),
+			$4 AND EXISTS (SELECT 1 FROM mod_book_chapters WHERE book_id = $1))
+		RETURNING id, book_id, title, content, position, subchapter, hidden, created_at
+	`, mod.InstanceID, title, content, subchapter).Scan(&ch.ID, &ch.BookID, &ch.Title, &ch.Content, &ch.Position, &ch.Subchapter, &ch.Hidden, &ch.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -234,60 +240,79 @@ func (s *Service) AddBookChapter(ctx context.Context, moduleID, title, content s
 // CourseContent resolves every section of a course to its modules, and every
 // module to its type-specific data, in one call — the course page needs
 // exactly this, in position order, without the client fanning out to 6
-// different per-type endpoints.
-func (s *Service) CourseContent(ctx context.Context, courseID string) ([]SectionContent, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, title, position FROM course_sections WHERE course_id = $1 ORDER BY position ASC
-	`, courseID)
+// different per-type endpoints. Viewers without mod:viewhidden do not see
+// hidden sections, modules or book chapters, and get a stub instead of the
+// data for modules outside their availability window.
+func (s *Service) CourseContent(ctx context.Context, courseID, userID string) ([]SectionContent, error) {
+	courseContextID, err := s.rbac.ContextID(ctx, rbac.ContextLevelCourse, courseID)
+	if err != nil {
+		return nil, err
+	}
+	seeHidden, err := s.rbac.Can(ctx, userID, "mod:viewhidden", courseContextID)
 	if err != nil {
 		return nil, err
 	}
 
-	type sectionRow struct {
-		id       string
-		title    string
-		position int
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, title, summary, position, visible FROM course_sections
+		WHERE course_id = $1 AND ($2 OR visible) ORDER BY position ASC
+	`, courseID, seeHidden)
+	if err != nil {
+		return nil, err
 	}
-	var sectionRows []sectionRow
+
+	var sections []SectionContent
 	for rows.Next() {
-		var sr sectionRow
-		if err := rows.Scan(&sr.id, &sr.title, &sr.position); err != nil {
+		var sc SectionContent
+		if err := rows.Scan(&sc.ID, &sc.Title, &sc.Summary, &sc.Position, &sc.Visible); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		sectionRows = append(sectionRows, sr)
+		sections = append(sections, sc)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	sections := make([]SectionContent, 0, len(sectionRows))
-	for _, sr := range sectionRows {
-		mods, err := s.modules.ListBySection(ctx, sr.id)
+	now := time.Now()
+	for i := range sections {
+		mods, err := s.modules.ListBySection(ctx, sections[i].ID)
 		if err != nil {
 			return nil, err
 		}
 
-		moduleContents := make([]ModuleContent, 0, len(mods))
+		sections[i].Modules = make([]ModuleContent, 0, len(mods))
 		for _, m := range mods {
-			data, err := s.resolveModuleData(ctx, m)
-			if err != nil {
-				return nil, err
+			if !m.Visible && !seeHidden {
+				continue
 			}
-			moduleContents = append(moduleContents, ModuleContent{
-				ID: m.ID, ModuleType: m.ModuleType, Position: m.Position, Visible: m.Visible, Data: data,
-			})
+			mc := ModuleContent{
+				ID: m.ID, ModuleType: m.ModuleType, Position: m.Position, Visible: m.Visible,
+				Intro: m.Intro, GroupMode: m.GroupMode, GroupingID: m.GroupingID,
+				AvailableFrom: m.AvailableFrom, AvailableUntil: m.AvailableUntil,
+			}
+			closed := (m.AvailableFrom != nil && now.Before(*m.AvailableFrom)) ||
+				(m.AvailableUntil != nil && now.After(*m.AvailableUntil))
+			if closed && !seeHidden {
+				mc.Restricted = true
+			} else {
+				data, err := s.resolveModuleData(ctx, m, seeHidden)
+				if err != nil {
+					return nil, err
+				}
+				mc.Data = data
+			}
+			sections[i].Modules = append(sections[i].Modules, mc)
 		}
-
-		sections = append(sections, SectionContent{
-			ID: sr.id, Title: sr.title, Position: sr.position, Modules: moduleContents,
-		})
+	}
+	if sections == nil {
+		sections = []SectionContent{}
 	}
 	return sections, nil
 }
 
-func (s *Service) resolveModuleData(ctx context.Context, m coursemodule.Module) (any, error) {
+func (s *Service) resolveModuleData(ctx context.Context, m coursemodule.Module, seeHidden bool) (any, error) {
 	switch m.ModuleType {
 	case "label":
 		var l LabelData
@@ -331,8 +356,8 @@ func (s *Service) resolveModuleData(ctx context.Context, m coursemodule.Module) 
 		}
 
 		rows, err := s.pool.Query(ctx, `
-			SELECT file_key, file_name, file_size, content_type FROM mod_folder_files
-			WHERE folder_id = $1 ORDER BY position ASC
+			SELECT id, dir_path, file_key, file_name, file_size, content_type FROM mod_folder_files
+			WHERE folder_id = $1 ORDER BY dir_path ASC, position ASC
 		`, m.InstanceID)
 		if err != nil {
 			return nil, err
@@ -341,16 +366,16 @@ func (s *Service) resolveModuleData(ctx context.Context, m coursemodule.Module) 
 
 		files := []FolderFileData{}
 		for rows.Next() {
-			var fileKey, fileName, contentType string
+			var id, dirPath, fileKey, fileName, contentType string
 			var size int64
-			if err := rows.Scan(&fileKey, &fileName, &size, &contentType); err != nil {
+			if err := rows.Scan(&id, &dirPath, &fileKey, &fileName, &size, &contentType); err != nil {
 				return nil, err
 			}
 			downloadURL, err := s.storage.PresignGet(ctx, fileKey, downloadURLExpiry)
 			if err != nil {
 				return nil, err
 			}
-			files = append(files, FolderFileData{FileName: fileName, FileSize: size, ContentType: contentType, DownloadURL: downloadURL})
+			files = append(files, FolderFileData{ID: id, DirPath: dirPath, FileName: fileName, FileSize: size, ContentType: contentType, DownloadURL: downloadURL})
 		}
 		if err := rows.Err(); err != nil {
 			return nil, err
@@ -364,9 +389,9 @@ func (s *Service) resolveModuleData(ctx context.Context, m coursemodule.Module) 
 		}
 
 		rows, err := s.pool.Query(ctx, `
-			SELECT id, title, content, position FROM mod_book_chapters
-			WHERE book_id = $1 ORDER BY position ASC
-		`, m.InstanceID)
+			SELECT id, title, content, position, subchapter, hidden FROM mod_book_chapters
+			WHERE book_id = $1 AND ($2 OR NOT hidden) ORDER BY position ASC
+		`, m.InstanceID, seeHidden)
 		if err != nil {
 			return nil, err
 		}
@@ -375,7 +400,7 @@ func (s *Service) resolveModuleData(ctx context.Context, m coursemodule.Module) 
 		chapters := []BookChapterData{}
 		for rows.Next() {
 			var c BookChapterData
-			if err := rows.Scan(&c.ID, &c.Title, &c.Content, &c.Position); err != nil {
+			if err := rows.Scan(&c.ID, &c.Title, &c.Content, &c.Position, &c.Subchapter, &c.Hidden); err != nil {
 				return nil, err
 			}
 			chapters = append(chapters, c)

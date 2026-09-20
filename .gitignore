@@ -31,3 +31,7 @@ apps/mobile/*.iml
 
 # Docker volumes (local dev data)
 infra/data/
+
+# Local design notes and design-tool state
+design.md
+.hallmark/
